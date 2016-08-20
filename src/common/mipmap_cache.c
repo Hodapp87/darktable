@@ -1163,7 +1163,7 @@ static void _init_8(uint8_t *buf, uint32_t *width, uint32_t *height, dt_colorspa
   char filename[PATH_MAX] = { 0 };
   gboolean from_cache = TRUE;
 
-  /* do not even try to process file if it isnt available */
+  /* do not even try to process file if it isn't available */
   dt_image_full_path(imgid, filename, sizeof(filename), &from_cache);
   if(!*filename || !g_file_test(filename, G_FILE_TEST_EXISTS))
   {
@@ -1214,6 +1214,17 @@ static void _init_8(uint8_t *buf, uint32_t *width, uint32_t *height, dt_colorspa
       uint8_t *tmp = 0;
       int32_t thumb_width, thumb_height;
       res = dt_imageio_large_thumbnail(filename, &tmp, &thumb_width, &thumb_height, color_space);
+
+      // Don't ever scale a thumbnail up.  If the thumbnail is too
+      // small for this mipmap, do not use it.
+      if (!res && (thumb_width < wd || thumb_height < ht))
+      {
+        dt_print(DT_DEBUG_CACHE,
+                 "[_init_8] ignoring %dx%d thumbnail for %dx%d mipmap\n",
+                 thumb_width, thumb_height, wd, ht);
+        res = 1;
+      }
+      
       if(!res)
       {
         // scale to fit
