@@ -1540,21 +1540,7 @@ static int get_quality()
 static int get_thumb_quality(int width, int height)
 {
   // we check if we need ultra-high quality thumbnail for this size
-  char *min = dt_conf_get_string("plugins/lighttable/thumbnail_hq_min_level");
-
-  int level = dt_mipmap_cache_get_matching_size(darktable.mipmap_cache, width, height);
-  int res = 0;
-  if (strcmp(min, "always")==0) res = 1;
-  else if (strcmp(min, "small")==0) res = ( level >= 1 );
-  else if (strcmp(min, "VGA")==0) res = ( level >= 2 );
-  else if (strcmp(min, "720p")==0) res = ( level >= 3 );
-  else if (strcmp(min, "1080p")==0) res = ( level >= 4 );
-  else if (strcmp(min, "WQXGA")==0) res = ( level >= 5 );
-  else if (strcmp(min, "4k")==0) res = ( level >= 6 );
-  else if (strcmp(min, "5K")==0) res = ( level >= 7 );
-
-  g_free(min);
-  return res;
+  return check_thumb_quality(width, height, "plugins/lighttable/thumbnail_hq_min_level");
 }
 
 void process(struct dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, const void *const i, void *const o,

@@ -155,6 +155,11 @@ dt_mipmap_size_t dt_mipmap_cache_get_matching_size(
     const int32_t width,
     const int32_t height);
 
+// Return 1 if a thumbnail of the size 'width' by 'height' has the
+// minimum resolution specified at the given configuration option name,
+// and otherwise 0.
+int check_thumb_quality(int width, int height, const char * config_name);
+
 // returns the colorspace to use for created thumbnails, takes config into account
 dt_colorspaces_color_profile_type_t dt_mipmap_cache_get_colorspace();
 
