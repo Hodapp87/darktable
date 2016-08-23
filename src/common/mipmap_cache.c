@@ -1181,7 +1181,12 @@ static void _init_8(uint8_t *buf, uint32_t *width, uint32_t *height, dt_colorspa
   const int incompatible = !strncmp(cimg->exif_maker, "Phase One", 9);
   dt_image_cache_read_release(darktable.image_cache, cimg);
 
-  if(!altered && !dt_conf_get_bool("never_use_embedded_thumb") && !incompatible)
+  // Get the smallest thumbnail we'll tolerate:
+  char *min = dt_conf_get_string("embedded_thumb_minimum");
+
+  int ignore_thumb = dt_conf_get_bool("never_use_embedded_thumb") || (strcmp(min, "never") == 0);
+  
+  if(!altered && !ignore_thumb && !incompatible)
   {
     const dt_image_orientation_t orientation = dt_image_get_orientation(imgid);
 
@@ -1215,14 +1220,32 @@ static void _init_8(uint8_t *buf, uint32_t *width, uint32_t *height, dt_colorspa
       int32_t thumb_width, thumb_height;
       res = dt_imageio_large_thumbnail(filename, &tmp, &thumb_width, &thumb_height, color_space);
 
-      // Don't ever scale a thumbnail up.  If the thumbnail is too
-      // small for this mipmap, do not use it.
-      if (!res && (thumb_width < wd || thumb_height < ht))
+      if (!res)
       {
-        dt_print(DT_DEBUG_CACHE,
-                 "[_init_8] ignoring %dx%d thumbnail for %dx%d mipmap\n",
-                 thumb_width, thumb_height, wd, ht);
-        res = 1;
+
+        // Check what mipmap level corresponds to the thumbnail:
+        int level = dt_mipmap_cache_get_matching_size(darktable.mipmap_cache, thumb_width, thumb_height);
+        if      (strcmp(min, "always") ==0) res = 0;
+        else if (strcmp(min, "small")  ==0) res = ( level < 1 );
+        else if (strcmp(min, "VGA")    ==0) res = ( level < 2 );
+        else if (strcmp(min, "720p")   ==0) res = ( level < 3 );
+        else if (strcmp(min, "1080p")  ==0) res = ( level < 4 );
+        else if (strcmp(min, "WQXGA")  ==0) res = ( level < 5 );
+        else if (strcmp(min, "4k")     ==0) res = ( level < 6 );
+        else if (strcmp(min, "5K")     ==0) res = ( level < 7 );
+
+        if (res)
+        {
+          dt_print(DT_DEBUG_CACHE,
+                   "[_init_8] ignoring %dx%d thumbnail (user gave minimum of '%s')\n",
+                   thumb_width, thumb_height, min);
+        }
+        else if (thumb_width < wd || thumb_height < ht)
+        {
+          dt_print(DT_DEBUG_CACHE,
+                   "[_init_8] upscaling %dx%d thumbnail to %dx%d mipmap; consider increasing embedded_thumb_minimum\n",
+                   thumb_width, thumb_height, wd, ht);
+        }
       }
       
       if(!res)
@@ -1283,6 +1306,7 @@ static void _init_8(uint8_t *buf, uint32_t *width, uint32_t *height, dt_colorspa
 
   // fprintf(stderr, "[mipmap init 8] export image %u finished (sizes %d %d => %d %d)!\n", imgid, wd, ht,
   // dat.head.width, dat.head.height);
+  g_free(min);
 
   // any errors?
   if(res)

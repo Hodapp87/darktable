@@ -148,6 +148,25 @@
     <shortdescription>don't use embedded preview JPEG but half-size raw</shortdescription>
     <longdescription>check this option to not use the embedded JPEG from the raw file but process the raw data. this is slower but gives you color managed thumbnails.</longdescription>
   </dtconfig>
+  <dtconfig prefs="gui">
+    <name>embedded_thumb_minimum</name>
+    <type>
+      <enum>
+        <option>always</option>
+        <option>small</option>
+        <option>VGA</option>
+        <option>720p</option>
+        <option>1080p</option>
+        <option>WQXGA</option>
+        <option>4K</option>
+        <option>5K</option>
+        <option>never</option>
+      </enum>
+    </type>
+    <default>1080p</default>
+    <shortdescription>use embedded thumbnails if at least</shortdescription>
+    <longdescription>if the thumbnails are larger than this resolution, image previews will come from them; otherwise, image previews will come from the raw file.  If you notice blockiness in lighttable mode, you may need to increase this.</longdescription>
+  </dtconfig>
   <dtconfig prefs="core">
     <name>write_sidecar_files</name>
     <type>bool</type>
