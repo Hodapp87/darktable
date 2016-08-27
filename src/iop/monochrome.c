@@ -56,6 +56,8 @@ typedef struct dt_iop_monochrome_gui_data_t
 {
   GtkDrawingArea *area;
   GtkWidget *highlights;
+  GtkToggleButton *adj_picker; // Color adjustment picker
+  GtkWidget *adj_color; // Color chosen by adj_picker
   int dragging;
   cmsHTRANSFORM xform;
 } dt_iop_monochrome_gui_data_t;
@@ -368,7 +370,8 @@ static gboolean dt_iop_monochrome_draw(GtkWidget *widget, cairo_t *crf, gpointer
   dt_iop_monochrome_gui_data_t *g = (dt_iop_monochrome_gui_data_t *)self->gui_data;
   dt_iop_monochrome_params_t *p = (dt_iop_monochrome_params_t *)self->params;
 
-  if(self->request_color_pick != DT_REQUEST_COLORPICK_OFF)
+  if(self->request_color_pick != DT_REQUEST_COLORPICK_OFF &&
+     !gtk_toggle_button_get_active(g->adj_picker))
   {
     float old_a = p->a, old_b = p->b, old_size = p->size;
     p->a = self->picked_color[1];
@@ -380,6 +383,29 @@ static gboolean dt_iop_monochrome_draw(GtkWidget *widget, cairo_t *crf, gpointer
       dt_dev_add_history_item(darktable.develop, self, TRUE);
   }
 
+  // If the adjustment color picker is active, then update the color
+  // from that picker.
+  if(self->request_color_pick != DT_REQUEST_COLORPICK_OFF &&
+     gtk_toggle_button_get_active(g->adj_picker))
+  {
+    double rgb[3] = { 0.5, 0.5, 0.5 };
+    cmsCIELab Lab;
+    Lab.L = self->picked_color[0];
+    Lab.a = self->picked_color[1];
+    Lab.b = self->picked_color[2];
+
+    cmsDoTransform(g->xform, &Lab, rgb, 1);
+    
+    GdkRGBA c = (GdkRGBA){.red = rgb[0],
+                          .green = rgb[1],
+                          .blue = rgb[2],
+                          .alpha = 1.0 };
+    gtk_color_chooser_set_rgba(GTK_COLOR_CHOOSER(g->adj_color), &c);
+    // TODO, hodapp: Add slider to interpolate between this and p->a,
+    // p->b (and possibly extrapolate in the negatives, i.e. to reduce
+    // this color's effect)
+  }
+  
   const int inset = DT_COLORCORRECTION_INSET;
   GtkAllocation allocation;
   gtk_widget_get_allocation(widget, &allocation);
@@ -551,10 +577,15 @@ static void picker_callback(GtkWidget *button, gpointer user_data)
   dt_iop_module_t *self = (dt_iop_module_t *)user_data;
   if(darktable.gui->reset) return;
 
-  if(self->request_color_pick == DT_REQUEST_COLORPICK_OFF)
+  if(self->request_color_pick == DT_REQUEST_COLORPICK_OFF) {
+    dt_print(DT_DEBUG_DEV, "[picker_callback] DT_REQUEST_COLORPICK_OFF\n");
     self->request_color_pick = DT_REQUEST_COLORPICK_MODULE;
+  }
   else
+  {
+    dt_print(DT_DEBUG_DEV, "[picker_callback] not DT_REQUEST_COLORPICK_OFF\n");
     self->request_color_pick = DT_REQUEST_COLORPICK_OFF;
+  }
 
   dt_iop_request_focus(self);
 
@@ -564,6 +595,43 @@ static void picker_callback(GtkWidget *button, gpointer user_data)
     dt_control_queue_redraw();
 
   if(self->off) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->off), 1);
+}
+
+static void colorpick_toggled(GtkToggleButton *togglebutton, dt_iop_module_t *self)
+{
+  //dt_iop_monochrome_gui_data_t *g = (dt_iop_monochrome_gui_data_t *)self->gui_data;
+
+  // hodapp: Below is copied from borders.c and could use some explanation
+  if(darktable.gui->reset) return;
+
+  self->request_color_pick
+      = (gtk_toggle_button_get_active(togglebutton) ? DT_REQUEST_COLORPICK_MODULE : DT_REQUEST_COLORPICK_OFF);
+
+  /* use point sample */
+  if(self->request_color_pick != DT_REQUEST_COLORPICK_OFF)
+  {
+    dt_lib_colorpicker_set_point(darktable.lib, 0.5, 0.5);
+    dt_dev_reprocess_all(self->dev);
+  }
+  else
+    dt_control_queue_redraw();
+
+  if(self->off) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->off), 1);
+  dt_iop_request_focus(self);
+
+      /*
+      dt_iop_module_t *self = (dt_iop_module_t *)user_data;
+      dt_print(DT_DEBUG_DEV,
+               "[dt_iop_monochrome_draw] picked_color, L=%.3f a=%.3f b=%.3f)\n",
+               self->picked_color[0], self->picked_color[1], self->picked_color[2]);
+      dt_print(DT_DEBUG_DEV,
+               "[dt_iop_monochrome_draw] picked_color_min, L=%.3f a=%.3f b=%.3f\n",
+               self->picked_color_min[0], self->picked_color_min[1], self->picked_color_min[2]);
+      dt_print(DT_DEBUG_DEV,
+               "[dt_iop_monochrome_draw] picked_color_max, L=%.3f a=%.3f b=%.3f\n",
+               self->picked_color_max[0], self->picked_color_max[1], self->picked_color_max[2]);
+      */
+  
 }
 
 void gui_init(struct dt_iop_module_t *self)
@@ -599,6 +667,32 @@ void gui_init(struct dt_iop_module_t *self)
   g_signal_connect(G_OBJECT(g->highlights), "value-changed", G_CALLBACK(highlights_callback), self);
   g_signal_connect(G_OBJECT(g->highlights), "quad-pressed", G_CALLBACK(picker_callback), self);
 
+  // hodapp: Touch this up and all of the below
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+
+  // Color adjustment picker:
+  g->adj_picker = GTK_TOGGLE_BUTTON(dtgtk_togglebutton_new(dtgtk_cairo_paint_colorpicker, CPF_STYLE_FLAT));
+  gtk_widget_set_tooltip_text(GTK_WIDGET(g->adj_picker), _("adjustment color from image"));
+  gtk_widget_set_size_request(GTK_WIDGET(g->adj_picker), DT_PIXEL_APPLY_DPI(24), DT_PIXEL_APPLY_DPI(24));
+  g_signal_connect(G_OBJECT(g->adj_picker), "toggled", G_CALLBACK(colorpick_toggled), self);
+
+  // Adjustment color:
+  GdkRGBA color = (GdkRGBA){.red = 0, .green = 0, .blue = 0, .alpha = 1.0 };
+  g->adj_color = gtk_color_button_new_with_rgba(&color);
+  gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(g->adj_color), FALSE);
+  gtk_widget_set_size_request(GTK_WIDGET(g->adj_color), DT_PIXEL_APPLY_DPI(24), DT_PIXEL_APPLY_DPI(24));
+  gtk_color_button_set_title(GTK_COLOR_BUTTON(g->adj_color), _("adjustment color"));
+  /*
+    p->color[0] = self->picked_color[0];
+    p->color[1] = self->picked_color[1];
+    p->color[2] = self->picked_color[2];
+    gtk_color_chooser_set_rgba(GTK_COLOR_CHOOSER(g->colorpick), &c);
+  */
+
+  gtk_box_pack_start(GTK_BOX(box), GTK_WIDGET(g->adj_color), FALSE, TRUE, 0);
+  gtk_box_pack_start(GTK_BOX(box), GTK_WIDGET(g->adj_picker), FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(self->widget), box, TRUE, TRUE, 0);
+  
   cmsHPROFILE hsRGB = dt_colorspaces_get_profile(DT_COLORSPACE_SRGB, "", DT_PROFILE_DIRECTION_IN)->profile;
   cmsHPROFILE hLab = dt_colorspaces_get_profile(DT_COLORSPACE_LAB, "", DT_PROFILE_DIRECTION_ANY)->profile;
   g->xform = cmsCreateTransform(hLab, TYPE_Lab_DBL, hsRGB, TYPE_RGB_DBL, INTENT_PERCEPTUAL,
