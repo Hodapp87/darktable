@@ -58,6 +58,8 @@ typedef struct dt_iop_monochrome_gui_data_t
   GtkWidget *highlights;
   GtkToggleButton *adj_picker; // Color adjustment picker
   GtkWidget *adj_color; // Color chosen by adj_picker
+  GtkWidget *adj_slider; // Slider to interpolate/extrapolate
+                         // adjustment
   int dragging;
   cmsHTRANSFORM xform;
 } dt_iop_monochrome_gui_data_t;
@@ -401,9 +403,7 @@ static gboolean dt_iop_monochrome_draw(GtkWidget *widget, cairo_t *crf, gpointer
                           .blue = rgb[2],
                           .alpha = 1.0 };
     gtk_color_chooser_set_rgba(GTK_COLOR_CHOOSER(g->adj_color), &c);
-    // TODO, hodapp: Add slider to interpolate between this and p->a,
-    // p->b (and possibly extrapolate in the negatives, i.e. to reduce
-    // this color's effect)
+    // TODO: Factor out the above code (it's repeated elsewhere)
   }
   
   const int inset = DT_COLORCORRECTION_INSET;
@@ -634,6 +634,44 @@ static void colorpick_toggled(GtkToggleButton *togglebutton, dt_iop_module_t *se
   
 }
 
+static void adj_slider_callback(GtkWidget *slider, dt_iop_module_t *self)
+{
+  if(self->dt->gui->reset) return;
+
+  dt_iop_monochrome_params_t *p = (dt_iop_monochrome_params_t *)self->params;
+  dt_iop_monochrome_gui_data_t *g = (dt_iop_monochrome_gui_data_t *)self->gui_data;
+    
+  float f = dt_bauhaus_slider_get(slider) / 100.0f;
+  
+  dt_print(DT_DEBUG_DEV,
+           "[adj_slider_callback] f=%.4f\n", f);
+
+  double rgb[3] = { 0.0, 0.0, 0.0 };
+  cmsCIELab Lab;
+  Lab.L = self->picked_color[0];
+  Lab.a = self->picked_color[1];
+  Lab.b = self->picked_color[2];
+  
+  cmsDoTransform(g->xform, &Lab, rgb, 1);
+  
+  GdkRGBA c = (GdkRGBA){ .red = rgb[0],
+                         .green = rgb[1],
+                         .blue = rgb[2],
+                         .alpha = 1.0 };
+
+  gtk_color_chooser_set_rgba(GTK_COLOR_CHOOSER(g->adj_color), &c);
+
+  float old_a = p->a, old_b = p->b; //, old_size = p->size;
+  p->a = f*Lab.a + (1-f)*old_a;
+  p->b = f*Lab.b + (1-f)*old_b;
+  //float da = self->picked_color_max[1] - self->picked_color_min[1];
+  //float db = self->picked_color_max[2] - self->picked_color_min[2];
+  //p->size = CLAMP((da + db)/128.0, .5, 3.0);
+  if(old_a != p->a || old_b != p->b/* || old_size != p->size*/)
+    dt_dev_add_history_item(darktable.develop, self, TRUE);
+}
+
+
 void gui_init(struct dt_iop_module_t *self)
 {
   self->gui_data = malloc(sizeof(dt_iop_monochrome_gui_data_t));
@@ -682,13 +720,15 @@ void gui_init(struct dt_iop_module_t *self)
   gtk_color_chooser_set_use_alpha(GTK_COLOR_CHOOSER(g->adj_color), FALSE);
   gtk_widget_set_size_request(GTK_WIDGET(g->adj_color), DT_PIXEL_APPLY_DPI(24), DT_PIXEL_APPLY_DPI(24));
   gtk_color_button_set_title(GTK_COLOR_BUTTON(g->adj_color), _("adjustment color"));
-  /*
-    p->color[0] = self->picked_color[0];
-    p->color[1] = self->picked_color[1];
-    p->color[2] = self->picked_color[2];
-    gtk_color_chooser_set_rgba(GTK_COLOR_CHOOSER(g->colorpick), &c);
-  */
 
+  // Adjustment slider:
+  g->adj_slider = dt_bauhaus_slider_new_with_range(self, -100.0, 100.0, 0.1, 50, 2);
+  dt_bauhaus_widget_set_label(g->adj_slider, NULL, _("factor"));
+  dt_bauhaus_slider_set_format(g->adj_slider, "%.2f%%");
+  g_signal_connect(G_OBJECT(g->adj_slider), "value-changed", G_CALLBACK(adj_slider_callback), self);
+  gtk_widget_set_tooltip_text(g->adj_slider, _("influence of this color"));
+
+  gtk_box_pack_start(GTK_BOX(box), g->adj_slider, TRUE, TRUE, 0);
   gtk_box_pack_start(GTK_BOX(box), GTK_WIDGET(g->adj_color), FALSE, TRUE, 0);
   gtk_box_pack_start(GTK_BOX(box), GTK_WIDGET(g->adj_picker), FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(self->widget), box, TRUE, TRUE, 0);
